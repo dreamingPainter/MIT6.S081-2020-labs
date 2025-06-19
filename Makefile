@@ -151,7 +151,8 @@ UPROGS=\
 	$U/_zombie\
 	$U/_zry_test_pipe\
 	$U/_pingpong\
-
+	$U/_sleep\
+	$U/_find\
 
 ifeq ($(LAB),syscall)
 UPROGS += \
