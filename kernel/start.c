@@ -21,17 +21,17 @@ void
 start()
 {
   // set M Previous Privilege mode to Supervisor, for mret.
-  unsigned long x = r_mstatus();
-  x &= ~MSTATUS_MPP_MASK;
-  x |= MSTATUS_MPP_S;
-  w_mstatus(x);
+  unsigned long x = r_mstatus();  // read RISC-V [mstatus] register value
+  x &= ~MSTATUS_MPP_MASK;         // clean [mstatus] register value
+  x |= MSTATUS_MPP_S;             // set x val = supervisor mode
+  w_mstatus(x);                   // write x val into register [mstatus]
 
   // set M Exception Program Counter to main, for mret.
   // requires gcc -mcmodel=medany
   w_mepc((uint64)main);
 
   // disable paging for now.
-  w_satp(0);
+  w_satp(0);  // [supervisor addr translation and protection] register.
 
   // delegate all interrupts and exceptions to supervisor mode.
   w_medeleg(0xffff);
@@ -45,8 +45,8 @@ start()
   int id = r_mhartid();
   w_tp(id);
 
-  // switch to supervisor mode and jump to main().
-  asm volatile("mret");
+  // 2 things: machine mode switch to supervisor mode and jump to main().
+  asm volatile("mret"); // machine return from trap, cause pc val equal to main function addr
 }
 
 // set up to receive timer interrupts in machine mode,
