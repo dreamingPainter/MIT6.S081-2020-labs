@@ -25,20 +25,21 @@ extern char trampoline[]; // trampoline.S
 void
 procinit(void)
 {
+  // each proccess need own kernel stack and proccess control block(PCB)
   struct proc *p;
   
   initlock(&pid_lock, "nextpid");
-  for(p = proc; p < &proc[NPROC]; p++) {
-      initlock(&p->lock, "proc");
+  for(p = proc; p < &proc[NPROC]; p++) {  // 最多NPROC进程, proc是全局进程表
+      initlock(&p->lock, "proc"); // 为每个PCB初始化锁
 
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
+      char *pa = kalloc();  // 分配内核栈
       if(pa == 0)
-        panic("kalloc");
+        panic("kalloc");    // 触发系统崩溃
       uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);  // 映射内核栈到高地址虚拟空间
       p->kstack = va;
   }
   kvminithart();

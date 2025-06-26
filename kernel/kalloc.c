@@ -21,24 +21,25 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
-} kmem;
+} kmem; // 列表和自选锁被封装在一个结构体中
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
+  initlock(&kmem.lock, "kmem"); // 初始化分配器
+  freerange(end, (void*)PHYSTOP); // 初始化空闲列表范围：内核结束到PHYSTOP之间的每一页
 }
 
 void
 freerange(void *pa_start, void *pa_end)
 {
   char *p;
-  p = (char*)PGROUNDUP((uint64)pa_start);
+  p = (char*)PGROUNDUP((uint64)pa_start); // 确保只释放对齐的物理地址
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
     kfree(p);
 }
 
+// 物理内存回收函数，将指定的物理页标记为空闲
 // Free the page of physical memory pointed at by v,
 // which normally should have been returned by a
 // call to kalloc().  (The exception is when
@@ -48,17 +49,18 @@ kfree(void *pa)
 {
   struct run *r;
 
+  // 对齐不满足；需要做内核代码和数据之后,end是内核结束地址; 不能超过物理上界
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
-  r = (struct run*)pa;
+  r = (struct run*)pa;  // 转换为链表节点
 
   acquire(&kmem.lock);
   r->next = kmem.freelist;
-  kmem.freelist = r;
+  kmem.freelist = r;  // 头插法
   release(&kmem.lock);
 }
 

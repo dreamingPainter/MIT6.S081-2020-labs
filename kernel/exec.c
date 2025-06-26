@@ -9,6 +9,7 @@
 
 static int loadseg(pde_t *pgdir, uint64 addr, struct inode *ip, uint offset, uint sz);
 
+// 替换当前进程的内存空间, 操作系统中程序加载与执行的核心
 int
 exec(char *path, char **argv)
 {
@@ -17,28 +18,29 @@ exec(char *path, char **argv)
   uint64 argc, sz = 0, sp, ustack[MAXARG+1], stackbase;
   struct elfhdr elf;
   struct inode *ip;
-  struct proghdr ph;
+  struct proghdr ph;  // 程序头, 每个proghdr描述程序中必须加载到内存中的一节
   pagetable_t pagetable = 0, oldpagetable;
   struct proc *p = myproc();
 
   begin_op();
 
-  if((ip = namei(path)) == 0){
+  // 打开指定的二进制文件
+  if((ip = namei(path)) == 0){  
     end_op();
     return -1;
   }
-  ilock(ip);
+  ilock(ip);  // 保护文件
 
   // Check ELF header
   if(readi(ip, 0, (uint64)&elf, 0, sizeof(elf)) != sizeof(elf))
     goto bad;
-  if(elf.magic != ELF_MAGIC)
+  if(elf.magic != ELF_MAGIC)// 检查四个字节的幻数是否正确
     goto bad;
 
-  if((pagetable = proc_pagetable(p)) == 0)
+  if((pagetable = proc_pagetable(p)) == 0)  // 分配无用户映射的新页表
     goto bad;
 
-  // Load program into memory.
+  // Load program into memory. 为每一个ELF段分配新内存
   for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
     if(readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph))
       goto bad;
@@ -48,13 +50,13 @@ exec(char *path, char **argv)
       goto bad;
     if(ph.vaddr + ph.memsz < ph.vaddr)
       goto bad;
-    uint64 sz1;
-    if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
+    uint64 sz1;   
+    if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0) // 为每个段分配内存
       goto bad;
     sz = sz1;
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
-    if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
+    if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0) // 找到分配的内存位置,在该地址中写入ELF段的每一页，使用readi从文件读取
       goto bad;
   }
   iunlockput(ip);
@@ -65,31 +67,33 @@ exec(char *path, char **argv)
   uint64 oldsz = p->sz;
 
   // Allocate two pages at the next page boundary.
-  // Use the second as the user stack.
+  // Use the second as the user stack. 一页用于栈, 一个作为保护页
   sz = PGROUNDUP(sz);
   uint64 sz1;
   if((sz1 = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
     goto bad;
   sz = sz1;
   uvmclear(pagetable, sz-2*PGSIZE);
-  sp = sz;
-  stackbase = sp - PGSIZE;
+  sp = sz;  // 栈指针初始位置
+  stackbase = sp - PGSIZE;  // 栈基地址(在保护页上方)
 
-  // Push argument strings, prepare rest of stack in ustack.
+  // Push argument strings, prepare rest of stack in ustack. 
+  // 推送命令行参数到栈,如"hello"，再推送argv指针数组
   for(argc = 0; argv[argc]; argc++) {
     if(argc >= MAXARG)
       goto bad;
-    sp -= strlen(argv[argc]) + 1;
+    sp -= strlen(argv[argc]) + 1; // 为参数字符串分配栈空间
     sp -= sp % 16; // riscv sp must be 16-byte aligned
     if(sp < stackbase)
       goto bad;
-    if(copyout(pagetable, sp, argv[argc], strlen(argv[argc]) + 1) < 0)
+    // 将参数字符串从内核空间拷贝到用户栈
+    if(copyout(pagetable, sp, argv[argc], strlen(argv[argc]) + 1) < 0)  
       goto bad;
-    ustack[argc] = sp;
+    ustack[argc] = sp;  // 记住参数字符串在栈中的地址
   }
   ustack[argc] = 0;
 
-  // push the array of argv[] pointers.
+  // push the array of argv[] pointers. 准备argv指针数组到用户栈
   sp -= (argc+1) * sizeof(uint64);
   sp -= sp % 16;
   if(sp < stackbase)
@@ -100,7 +104,7 @@ exec(char *path, char **argv)
   // arguments to user main(argc, argv)
   // argc is returned via the system call return
   // value, which goes in a0.
-  p->trapframe->a1 = sp;
+  p->trapframe->a1 = sp;  // argv指针数组的栈地址,传给main
 
   // Save program name for debugging.
   for(last=s=path; *s; s++)
@@ -109,12 +113,12 @@ exec(char *path, char **argv)
   safestrcpy(p->name, last, sizeof(p->name));
     
   // Commit to the user image.
-  oldpagetable = p->pagetable;
+  oldpagetable = p->pagetable;  // swich to new proc pagetable
   p->pagetable = pagetable;
   p->sz = sz;
   p->trapframe->epc = elf.entry;  // initial program counter = main
-  p->trapframe->sp = sp; // initial stack pointer
-  proc_freepagetable(oldpagetable, oldsz);
+  p->trapframe->sp = sp; // initial stack pointer，初始化用户栈指针
+  proc_freepagetable(oldpagetable, oldsz);  // 回收旧程序的物理页和页表
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 

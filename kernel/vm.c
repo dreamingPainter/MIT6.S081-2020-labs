@@ -21,27 +21,33 @@ extern char trampoline[]; // trampoline.S
 void
 kvminit()
 {
-  kernel_pagetable = (pagetable_t) kalloc();
+  kernel_pagetable = (pagetable_t) kalloc();  // kernel page table's root pagetable
   memset(kernel_pagetable, 0, PGSIZE);
+  
+  // kvmmap : virtual addr, physic addr, size, permission
 
+  /// 映射硬件设备
   // uart registers
   kvmmap(UART0, UART0, PGSIZE, PTE_R | PTE_W);
 
-  // virtio mmio disk interface
+  // virtio mmio disk interface: 磁盘控制器
   kvmmap(VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
 
-  // CLINT
+  // CLINT: 时钟中断控制器
   kvmmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W);
 
-  // PLIC
+  // PLIC: 中断控制器
   kvmmap(PLIC, PLIC, 0x400000, PTE_R | PTE_W);
 
+  /// 映射内核代码段
   // map kernel text executable and read-only.
   kvmmap(KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
 
+  /// 映射内核数据段和物理内存
   // map kernel data and the physical RAM we'll make use of.
   kvmmap((uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
 
+  /// 映射trampoline页, 是内核虚拟地址空间的最高地址：存用户态和内核态切换到代码
   // map the trampoline for trap entry/exit to
   // the highest virtual address in the kernel.
   kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
@@ -53,7 +59,7 @@ void
 kvminithart()
 {
   w_satp(MAKE_SATP(kernel_pagetable));
-  sfence_vma();
+  sfence_vma(); // 确保内核后续执行指令时,使用最新的内核页表映射, 保证内核访问硬件\内存的正确性
 }
 
 // Return the address of the PTE in page table pagetable
@@ -113,10 +119,13 @@ walkaddr(pagetable_t pagetable, uint64 va)
 
 // add a mapping to the kernel page table.
 // only used when booting.
-// does not flush TLB or enable paging.
+// does not flush TLB or enable paging. 
+// 遍历虚拟地址范围(以页为单位), 为每个虚拟页找到对应的物理页
+// 在页表中添加PTE，记录映射关系和权限，大部分情况下是直接映射
 void
 kvmmap(uint64 va, uint64 pa, uint64 sz, int perm)
 {
+  // mmappages调用walk查找需要映射的虚拟地址的PTE地址
   if(mappages(kernel_pagetable, va, sz, pa, perm) != 0)
     panic("kvmmap");
 }
@@ -153,12 +162,16 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
+  // 遍历虚拟地址范围, 逐页映射
   for(;;){
+    // 如果PTE的标志位是无效的,则说明所需的页面是还未分配的
+    // pagetable是根页表, a是当前虚拟地址, 1表示若页表项不存在, 创建(递归分配二级、三级页表)
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
+    // 设置页表项, 建立映射
     if(*pte & PTE_V)
-      panic("remap");
-    *pte = PA2PTE(pa) | perm | PTE_V;
+      panic("remap"); // 防止重复映射,PTE_V已经是有效的了
+    *pte = PA2PTE(pa) | perm | PTE_V; // 将物理地址转换为PTE格式,提取物理页号PPN
     if(a == last)
       break;
     a += PGSIZE;

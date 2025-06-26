@@ -311,7 +311,7 @@ r_ra()
   return x;
 }
 
-// flush the TLB.
+// flush the TLB for cache coninstance, if the page table change, update
 static inline void
 sfence_vma()
 {
@@ -351,4 +351,4 @@ sfence_vma()
 #define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
 
 typedef uint64 pte_t;
-typedef uint64 *pagetable_t; // 512 PTEs
+typedef uint64 *pagetable_t; // 512 PTEs, kernel page table/process page table
