@@ -43,16 +43,17 @@ usertrap(void)
 
   // send interrupts and exceptions to kerneltrap(),
   // since we're now in the kernel.
-  w_stvec((uint64)kernelvec);
+  w_stvec((uint64)kernelvec); // 因为此时已经处于内核态，若后续发生中断等问题, 属于内核态陷阱, 需要用kernelvec处理
 
   struct proc *p = myproc();
   
-  // save user program counter.
-  p->trapframe->epc = r_sepc();
+  // save user program counter. avoid covering by other program for scheduling
+  p->trapframe->epc = r_sepc(); 
   
+  // system call
   if(r_scause() == 8){
-    // system call
 
+    // if killed by other program
     if(p->killed)
       exit(-1);
 
@@ -64,6 +65,7 @@ usertrap(void)
     // so don't enable until done with those registers.
     intr_on();
 
+    // system call, get a7 from p->trapframe->a7, system call's ret is stored in register [a0]
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
@@ -84,7 +86,7 @@ usertrap(void)
 }
 
 //
-// return to user space
+// kernel has to do before return to user space. when done, back to trampoline.
 //
 void
 usertrapret(void)
@@ -96,7 +98,7 @@ usertrapret(void)
   // we're back in user space, where usertrap() is correct.
   intr_off();
 
-  // send syscalls, interrupts, and exceptions to trampoline.S
+  // send syscalls, interrupts, and exceptions to trampoline.S, set stvec pointer to trampoline code
   w_stvec(TRAMPOLINE + (uservec - trampoline));
 
   // set up trapframe values that uservec will need when
@@ -123,9 +125,9 @@ usertrapret(void)
 
   // jump to trampoline.S at the top of memory, which 
   // switches to the user page table, restores user registers,
-  // and switches to user mode with sret.
-  uint64 fn = TRAMPOLINE + (userret - trampoline);
-  ((void (*)(uint64,uint64))fn)(TRAPFRAME, satp);
+  // and switches to user mode with sret. jump to userret func of trampoline
+  uint64 fn = TRAMPOLINE + (userret - trampoline); 
+  ((void (*)(uint64,uint64))fn)(TRAPFRAME, satp); // function pointer
 }
 
 // interrupts and exceptions from kernel code go here via kernelvec,

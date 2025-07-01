@@ -27,8 +27,8 @@ uservec:
 	# swap a0 and sscratch
         # so that a0 is TRAPFRAME
         csrrw a0, sscratch, a0
-
-        # save the user registers in TRAPFRAME
+        # 相当于在内核态下，内核帮忙存储通用寄存器们到用户页表trapframe的虚拟地址？
+        # save the user registers in TRAPFRAME(sd <源寄存器>, <偏移量>(<基址寄存器>))
         sd ra, 40(a0)
         sd sp, 48(a0)
         sd gp, 56(a0)
@@ -60,20 +60,20 @@ uservec:
         sd t5, 272(a0)
         sd t6, 280(a0)
 
-	# save the user a0 in p->trapframe->a0
-        csrr t0, sscratch
+	# save the user a0 in p->trapframe->a0, 读取控制状态寄存器 将sscratch寄存器的值读入t0, 因为这是a0原本的数据
+        csrr t0, sscratch        
         sd t0, 112(a0)
 
         # restore kernel stack pointer from p->trapframe->kernel_sp
-        ld sp, 8(a0)
+        ld sp, 8(a0)    
 
-        # make tp hold the current hartid, from p->trapframe->kernel_hartid
+        # make tp hold the current hartid, from p->trapframe->kernel_hartid, 读处理器编号, 用于多处理器环境下的线程标识
         ld tp, 32(a0)
 
         # load the address of usertrap(), p->trapframe->kernel_trap
         ld t0, 16(a0)
 
-        # restore kernel page table from p->trapframe->kernel_satp
+        # restore kernel page table from p->trapframe->kernel_satp, 切换到内核页表
         ld t1, 0(a0)
         csrw satp, t1
         sfence.vma zero, zero
@@ -92,14 +92,17 @@ userret:
         # a0: TRAPFRAME, in user page table.
         # a1: user page table, for satp.
 
-        # switch to the user page table.
+        # switch to the user page table. clean table cache(tlb)
         csrw satp, a1
         sfence.vma zero, zero
 
         # put the saved user a0 in sscratch, so we
         # can swap it with our a0 (TRAPFRAME) in the last step.
         ld t0, 112(a0)
-        csrw sscratch, t0
+        csrw sscratch, t0       
+        # 通过当前的a0寄存器找到trapframe中的a0寄存器, 
+        # 因为当前a0是trapframe的地址，
+        # 通过usertrapret函数的第一个参数传递, 但a0寄存器原本的内容(内核系统调用的返回值)也要找个地方存, 就存sscratch里了; 然后原本a0寄存器也有用户进入内核态前的值
 
         # restore all but a0 from TRAPFRAME
         ld ra, 40(a0)

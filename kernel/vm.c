@@ -398,10 +398,14 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   return 0;
 }
 
-// Copy a null-terminated string from user to kernel.
-// Copy bytes to dst from virtual address srcva in a given page table,
-// until a '\0', or max.
-// Return 0 on success, -1 on error.
+/// @brief Copy a null-terminated string from user to kernel. 
+///Copy bytes to dst from virtual address srcva in a given page table,
+/// until a '\0', or max.
+/// Return 0 on success, -1 on error.
+/// @param pagetable user progress's pagetable
+/// @param dst kernel's dst cache
+/// @param srcva user's string virtual address, need to be parse by kernel
+/// @param max maximal copy bytes num
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
@@ -409,15 +413,16 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   int got_null = 0;
 
   while(got_null == 0 && max > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
+    va0 = PGROUNDDOWN(srcva);       // srcva所在页的起始虚拟地址
+    pa0 = walkaddr(pagetable, va0); // 遍历给的用户页表, 转换为物理地址
     if(pa0 == 0)
       return -1;
-    n = PGSIZE - (srcva - va0);
+    n = PGSIZE - (srcva - va0);     
     if(n > max)
       n = max;
 
-    char *p = (char *) (pa0 + (srcva - va0));
+    // 复制当前页内的字符
+    char *p = (char *) (pa0 + (srcva - va0)); // 物理地址的起始位置
     while(n > 0){
       if(*p == '\0'){
         *dst = '\0';
@@ -432,7 +437,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
       dst++;
     }
 
-    srcva = va0 + PGSIZE;
+    srcva = va0 + PGSIZE; // 到下一页继续复制
   }
   if(got_null){
     return 0;
