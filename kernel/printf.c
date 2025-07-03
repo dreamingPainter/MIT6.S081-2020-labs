@@ -132,3 +132,17 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+void 
+backtrace(void) {
+  uint64 fp = r_fp();
+  printf("backtrace:\n");
+  // 检查当前栈帧是否在有效
+  while (PGROUNDDOWN(fp) != PGROUNDUP(fp))  
+  {
+    uint64 ra = *(uint64*)(fp-8);
+    printf("%p\n", ra);
+    fp = *(uint64*)(fp-16); // 打印更靠近栈顶的栈帧
+  }
+  
+}

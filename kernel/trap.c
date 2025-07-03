@@ -78,9 +78,18 @@ usertrap(void)
   if(p->killed)
     exit(-1);
 
-  // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  // timer interrupt, old ver is yield
+  if(which_dev == 2) {
+    --p->alarm_ticks;
+    // 时钟倒计时是否结束, 由于硬件将按照固定频率产生中断, 因此无需软件中断手动干预
+    if (p->alarm_interval != 0 && p->alarm_ticks <= 0 && p->alarm_has_over == 0) {
+      p->alarm_has_over = 1;                // 时钟触发
+      memmove(p->alarm_trapframe, p->trapframe, sizeof(struct trapframe));  // 备份当前trapframe
+      p->alarm_ticks = p->alarm_interval;   // 重置时钟倒计时
+      p->trapframe->epc = (uint64)p->alarm_handler;
+    } 
     yield();
+  }
 
   usertrapret();
 }
