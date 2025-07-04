@@ -47,8 +47,20 @@ sys_sbrk(void)
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;
-  if(growproc(n) < 0)
-    return -1;
+
+  // if(growproc(n) < 0)  // 立即分配
+  //   return -1;
+
+  /// 惰性分配
+  struct proc* p = myproc();
+  if (n > 0) {
+    // 增加内存(不做实际PTE和物理页分配)
+    p->sz += n;
+  } else if (p->sz + n > 0) {
+    // 减少内存, 删除相应PTE
+    p->sz = uvmdealloc(p->pagetable, p->sz, p->sz+n); // 没有相关映射, 没法unmmaped
+  } else return -1;
+
   return addr;
 }
 
