@@ -5,6 +5,9 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
+
 
 /*
  * the kernel's page table.
@@ -75,14 +78,14 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
     panic("walk");
 
   for(int level = 2; level > 0; level--) {
-    pte_t *pte = &pagetable[PX(level, va)];
+    pte_t *pte = &pagetable[PX(level, va)]; // 获取当前级别的PTE
     if(*pte & PTE_V) {
       pagetable = (pagetable_t)PTE2PA(*pte);
-    } else {
+    } else {  // 若PTE无效
       if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
-        return 0;
-      memset(pagetable, 0, PGSIZE);
-      *pte = PA2PTE(pagetable) | PTE_V;
+        return 0;                     // 不创建或分配失败
+      memset(pagetable, 0, PGSIZE);   // 初始化新也表
+      *pte = PA2PTE(pagetable) | PTE_V; // 设置当前PTE有效
     }
   }
   return &pagetable[PX(0, va)];
@@ -176,14 +179,15 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
   uint64 a;
   pte_t *pte;
 
+  // va是页对齐的
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
-    if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
+    if((pte = walk(pagetable, a, 0)) == 0)  // walk返回0表示未映射虚拟地址
+      continue;      
+    if((*pte & PTE_V) == 0) // 原先uvmunmap语义是解除已存在的合法映射，即虚拟地址合法，且PTE是有效的
+      continue;;
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -315,9 +319,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+      // panic("uvmcopy: pte should exist"); 未分配PTE
+      continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      continue;
+      // panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -356,6 +362,9 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
 
+  if (uvmislazyallocate(dstva)) {
+    uvmislazyallocate(dstva);
+  }
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
@@ -373,6 +382,36 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   return 0;
 }
 
+int uvmislazyallocate(uint64 va) {
+  // 页面是否为之前惰性分配的地址
+  pte_t* pte;
+  struct proc* p = myproc();
+
+  // 访问的虚拟地址在进程的合法申请空间
+  // 不是栈道guard page
+  // 页表项不存在
+  return va < p->sz
+    && PGROUNDDOWN(va) != PGROUNDDOWN(r_sp())
+    && (((pte = walk(p->pagetable, va, 0))==0) || ((*pte & PTE_V) == 0));
+}
+
+void uvmlazyallocate(uint64 va) {
+  // 为惰性分配的页面分配并映射物理地址
+  struct proc* p = myproc();
+  char* pa = kalloc();
+  if (pa == 0) {
+    printf("lazy alloc: out of memory\n");
+    p->killed = 1;
+  } else {
+    memset(pa, 0, PGSIZE);
+    if (mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)pa, PTE_W | PTE_X | PTE_R | PTE_U)!=0) {
+      printf("lazy alloc:failed to map page\n");
+      kfree(pa);
+      p->killed = 1;
+    }
+  }
+}
+
 // Copy from user to kernel.
 // Copy len bytes to dst from virtual address srcva in a given page table.
 // Return 0 on success, -1 on error.
@@ -380,6 +419,10 @@ int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
   uint64 n, va0, pa0;
+
+  if (uvmislazyallocate(srcva)) {
+    uvmislazyallocate(srcva);
+  }
 
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
@@ -407,6 +450,9 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
   uint64 n, va0, pa0;
   int got_null = 0;
+
+
+
 
   while(got_null == 0 && max > 0){
     va0 = PGROUNDDOWN(srcva);

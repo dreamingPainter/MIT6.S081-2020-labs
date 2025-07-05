@@ -59,8 +59,9 @@ sys_sbrk(void)
   } else if (p->sz + n > 0) {
     // 减少内存, 删除相应PTE
     p->sz = uvmdealloc(p->pagetable, p->sz, p->sz+n); // 没有相关映射, 没法unmmaped
-  } else return -1;
-
+  } else {
+    return -1;
+  }
   return addr;
 }
 
