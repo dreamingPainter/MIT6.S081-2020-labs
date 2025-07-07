@@ -504,7 +504,7 @@ sched(void)
   int intena;
   struct proc *p = myproc();
 
-  if(!holding(&p->lock))
+  if(!holding(&p->lock))  // 保证当前进程正确持有锁
     panic("sched p->lock");
   if(mycpu()->noff != 1)
     panic("sched locks");
