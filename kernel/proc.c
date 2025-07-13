@@ -357,7 +357,7 @@ exit(int status)
   // necessary or not. init may miss this wakeup, but that seems
   // harmless.
   acquire(&initproc->lock);
-  wakeup1(initproc);
+  wakeup1(initproc);  // 避免孤儿进程无法被回收的问题
   release(&initproc->lock);
 
   // grab a copy of p->parent, to ensure that we unlock the same
@@ -504,18 +504,18 @@ sched(void)
   int intena;
   struct proc *p = myproc();
 
-  if(!holding(&p->lock))  // 保证当前进程正确持有锁
+  if(!holding(&p->lock))  // 保证当前进程正确持有锁：不会同时被其他cpu修改
     panic("sched p->lock");
-  if(mycpu()->noff != 1)
+  if(mycpu()->noff != 1)  // 必须只有一层锁
     panic("sched locks");
-  if(p->state == RUNNING)
-    panic("sched running");
-  if(intr_get())
+  if(p->state == RUNNING) // 进程状态不能是runable
+    panic("sched running");   
+  if(intr_get())          // 禁用中断，防止上下文切换出现问题
     panic("sched interruptible");
 
-  intena = mycpu()->intena;
-  swtch(&p->context, &mycpu()->context);
-  mycpu()->intena = intena;
+  intena = mycpu()->intena;               // 保存当前中断状态
+  swtch(&p->context, &mycpu()->context);  // 切换上下文，cpu会从就绪队列中选择下一个进程
+  mycpu()->intena = intena;               // 恢复中断状态
 }
 
 // Give up the CPU for one scheduling round.
@@ -551,7 +551,7 @@ forkret(void)
 }
 
 // Atomically release lock and sleep on chan.
-// Reacquires lock when awakened.
+// Reacquires lock when awakened. lk 是调用者传入的锁，p->lock是保护进程状态的锁
 void
 sleep(void *chan, struct spinlock *lk)
 {
@@ -564,10 +564,12 @@ sleep(void *chan, struct spinlock *lk)
   // (wakeup locks p->lock),
   // so it's okay to release lk.
   if(lk != &p->lock){  //DOC: sleeplock0
+    // 避免进程锁和传入的锁上同一把锁
     acquire(&p->lock);  //DOC: sleeplock1
     release(lk);
   }
-
+  // 进程已被标记为SLEEPING（在p->lock保护下）
+  // 即使释放lk后，其他进程的wakeup必须等待p->lock释放，该进程睡眠才能操作该进程
   // Go to sleep.
   p->chan = chan;
   p->state = SLEEPING;
@@ -592,7 +594,7 @@ wakeup(void *chan)
   struct proc *p;
 
   for(p = proc; p < &proc[NPROC]; p++) {
-    acquire(&p->lock);
+    acquire(&p->lock);//wakeup必须等待sleep释放p->lock才能唤醒进程
     if(p->state == SLEEPING && p->chan == chan) {
       p->state = RUNNABLE;
     }

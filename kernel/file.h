@@ -1,5 +1,5 @@
 struct file {
-#ifdef LAB_NET
+#ifdef LAB_NET  // 网络扩展
   enum { FD_NONE, FD_PIPE, FD_INODE, FD_DEVICE, FD_SOCK } type;
 #else
   enum { FD_NONE, FD_PIPE, FD_INODE, FD_DEVICE } type;

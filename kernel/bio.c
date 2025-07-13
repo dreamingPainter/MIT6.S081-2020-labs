@@ -40,13 +40,13 @@ binit(void)
 
   initlock(&bcache.lock, "bcache");
 
-  // Create linked list of buffers
+  // Create linked list of buffers, head insert
   bcache.head.prev = &bcache.head;
   bcache.head.next = &bcache.head;
   for(b = bcache.buf; b < bcache.buf+NBUF; b++){
     b->next = bcache.head.next;
     b->prev = &bcache.head;
-    initsleeplock(&b->lock, "buffer");
+    initsleeplock(&b->lock, "buffer");  // 为缓冲区初始化睡眠锁
     bcache.head.next->prev = b;
     bcache.head.next = b;
   }
@@ -67,7 +67,7 @@ bget(uint dev, uint blockno)
     if(b->dev == dev && b->blockno == blockno){
       b->refcnt++;
       release(&bcache.lock);
-      acquiresleep(&b->lock);
+      acquiresleep(&b->lock); // b->lock保护的是b->data，避免进程写数据的时候，另一个进程同时读；或者本进程要读数据，有其他在写
       return b;
     }
   }
@@ -78,14 +78,15 @@ bget(uint dev, uint blockno)
     if(b->refcnt == 0) {
       b->dev = dev;
       b->blockno = blockno;
-      b->valid = 0;
+      b->valid = 0; // not be read
       b->refcnt = 1;
       release(&bcache.lock);
       acquiresleep(&b->lock);
       return b;
     }
   }
-  panic("bget: no buffers");
+  // all cache is busy, can't read and can't write, too many process is doing file system call
+  panic("bget: no buffers");  
 }
 
 // Return a locked buf with the contents of the indicated block.

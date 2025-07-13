@@ -125,32 +125,33 @@ sys_link(void)
   if(argstr(0, old, MAXPATH) < 0 || argstr(1, new, MAXPATH) < 0)
     return -1;
 
+  // 开始文件系统事务
   begin_op();
   if((ip = namei(old)) == 0){
     end_op();
     return -1;
   }
 
-  ilock(ip);
-  if(ip->type == T_DIR){
+  ilock(ip);    // 锁定 inode 防止并发修改
+  if(ip->type == T_DIR){  // 禁止对目录创建硬链接，防止目录循环
     iunlockput(ip);
     end_op();
     return -1;
   }
 
-  ip->nlink++;
-  iupdate(ip);
-  iunlock(ip);
+  ip->nlink++;  // 增加硬链接计数
+  iupdate(ip);  // 持久化写入磁盘
+  iunlock(ip);  // 释放锁
 
-  if((dp = nameiparent(new, name)) == 0)
+  if((dp = nameiparent(new, name)) == 0)  // 获取 new 的父目录 inode
     goto bad;
   ilock(dp);
   if(dp->dev != ip->dev || dirlink(dp, name, ip->inum) < 0){
     iunlockput(dp);
     goto bad;
   }
-  iunlockput(dp);
-  iput(ip);
+  iunlockput(dp); // 释放父目录锁
+  iput(ip);       // 减少inode引用计数
 
   end_op();
 

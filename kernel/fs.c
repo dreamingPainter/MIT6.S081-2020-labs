@@ -65,18 +65,20 @@ static uint
 balloc(uint dev)
 {
   int b, bi, m;
-  struct buf *bp;
+  struct buf *bp; // 读取位图块的缓冲区
 
   bp = 0;
-  for(b = 0; b < sb.size; b += BPB){
-    bp = bread(dev, BBLOCK(b, sb));
-    for(bi = 0; bi < BPB && b + bi < sb.size; bi++){
-      m = 1 << (bi % 8);
-      if((bp->data[bi/8] & m) == 0){  // Is block free?
+  for(b = 0; b < sb.size; b += BPB){  // for 所有位图块
+    // sb.size()是文件系统的总块数, BPB：Block per bitmap block
+    // BBLOCK(b,sb)计算块号在位图块中的位置
+    bp = bread(dev, BBLOCK(b, sb)); // 读第b个数据块的位图块
+    for(bi = 0; bi < BPB && b + bi < sb.size; bi++){  // 遍历每一位
+      m = 1 << (bi % 8);  // 一个字节里第几位
+      if((bp->data[bi/8] & m) == 0){  // Is block free? // 字节块中的某字节的第m位是否为0
         bp->data[bi/8] |= m;  // Mark block in use.
-        log_write(bp);
-        brelse(bp);
-        bzero(dev, b + bi);
+        log_write(bp);  // 由于对位图块进行了操作，所以同理要写日志
+        brelse(bp);     // 对块在LRU进行头插
+        bzero(dev, b + bi); // 对第b+bi个块置为0
         return b + bi;
       }
     }
@@ -260,7 +262,7 @@ iget(uint dev, uint inum)
 
   // Recycle an inode cache entry.
   if(empty == 0)
-    panic("iget: no inodes");
+    panic("iget: no inodes"); // 缓存已满，无法分配
 
   ip = empty;
   ip->dev = dev;
@@ -528,20 +530,25 @@ namecmp(const char *s, const char *t)
 struct inode*
 dirlookup(struct inode *dp, char *name, uint *poff)
 {
+  // 在目录中搜索具有给定名称的条目
   uint off, inum;
   struct dirent de;
 
+  // 保证类型为目录类型
   if(dp->type != T_DIR)
     panic("dirlookup not DIR");
 
+  // 遍历目录内容
   for(off = 0; off < dp->size; off += sizeof(de)){
+    // 从inode dp中读取数据到内存缓冲区
+    // dp:目标inode 0:偏移类型, 文件内偏移 de缓冲区地址 off目录内的字节偏移 目录大小
     if(readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
       panic("dirlookup read");
-    if(de.inum == 0)
+    if(de.inum == 0)  // 跳过空目录
       continue;
     if(namecmp(name, de.name) == 0){
       // entry matches path element
-      if(poff)
+      if(poff)  // 避免poff是空指针
         *poff = off;
       inum = de.inum;
       return iget(dp->dev, inum);
@@ -627,8 +634,14 @@ skipelem(char *path, char *name)
 static struct inode*
 namex(char *path, int nameiparent, char *name)
 {
+  // nameiparent：标志位（0 表示namei模式
+  // 返回目标 inode；1 表示nameiparent模式，返回父目录 inode）
   struct inode *ip, *next;
-
+  /** 
+   * 将一个文件路径（如/home/user/file.txt）拆解为
+   * 多个组件（home、user、file.txt），
+   * 逐个查找每个组件对应的 inode，最终得到目标文件的 inode。
+  */
   if(*path == '/')
     ip = iget(ROOTDEV, ROOTINO);
   else
@@ -646,11 +659,12 @@ namex(char *path, int nameiparent, char *name)
       return ip;
     }
     if((next = dirlookup(ip, name, 0)) == 0){
+      // 查找当前组件对应的inode，每次迭代都必须在当前索引结点ip中查找name
       iunlockput(ip);
       return 0;
     }
     iunlockput(ip);
-    ip = next;
+    ip = next;  // 移动到下一级目录
   }
   if(nameiparent){
     iput(ip);

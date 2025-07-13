@@ -90,8 +90,8 @@ pipewrite(struct pipe *pi, uint64 addr, int n)
         release(&pi->lock);
         return -1;
       }
-      wakeup(&pi->nread);
-      sleep(&pi->nwrite, &pi->lock);
+      wakeup(&pi->nread); // 唤醒可能在等待读取数据的进程
+      sleep(&pi->nwrite, &pi->lock);  // 当前进程睡眠，等待缓冲区有空间可写
     }
     if(copyin(pr->pagetable, &ch, addr + i, 1) == -1)
       break;
